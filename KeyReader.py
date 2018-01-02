@@ -3,11 +3,31 @@ import Chitext
 import PublicKey
 import numpy as np
 import Textpair
-from math import pow
+from math import pow, sqrt
 from operator import xor, mul
 import random
+from random import SystemRandom
+from multiprocessing.pool import Pool
+# import pathos.pools as pp
+import time
 
 np.set_printoptions(threshold=np.inf)
+
+
+def unwrap_self_pairs(arg, **kwarg):
+    return KeyReader.chitext_creation_process(*arg, **kwarg)
+
+
+def unwrap_self_rel(arg, **kwarg):
+    return KeyReader.create_relation(*arg, **kwarg)
+
+gen = SystemRandom()
+
+
+def generate_plaintext(length):
+    # return [1, 0, 1, 0, 0] # For testing purposes
+    # return np.asarray([randint(0, 1) for x in xrange(length)])
+    return np.asarray([gen.randrange(2) for x in xrange(length)])
 
 class KeyReader:
     """
@@ -16,7 +36,7 @@ class KeyReader:
     def __init__(self, keyfile, rel):
         self.pkey = PublicKey.PublicKey(self.read_keyfile(keyfile))
         self.rel = rel
-        self.num = int(self.get_num())
+        self.num = self.get_num()
 
     @staticmethod
     def read_keyfile(keyfile):
@@ -40,82 +60,65 @@ class KeyReader:
             keystring = inputstream.read()
         return keystring
 
-    def GEPP(self, A, b, doPricing=True):
-        '''
-        Gaussian elimination with partial pivoting.
+    def gauss(self, A):
+        num_columns = A.shape[1]
+        num_rows = A.shape[0]
+        # try:
+        offset = 0
+        for k_col in xrange(0, num_columns):
+            k_row = k_col + offset
+            if k_row == num_columns:
+                print "Matrix has row echelon form"
+                print k_col, k_row
+                return A
+            # if k_col >= 2:
+            # print A
+            # quit()
+            print "K: %d, %d" % (k_col, k_row)
+            maxindex = A[k_col:, k_row].argmax() + k_col # Pruefen, wo die erste 1 unterhalb des Pivotelements sich befindet
+            while A[maxindex, k_col + offset] == 0:
 
-        input: A is an n x n numpy matrix
-               b is an n x 1 numpy array
-        output: x is the solution of Ax=b
-                with the entries permuted in
-                accordance with the pivoting
-                done by the algorithm
-        post-condition: A and b have been modified.
-        '''
-        n = len(A)
-        if b.size != n:
-            raise ValueError("Invalid argument: incompatible sizes between" +
-                             "A & b.", b.size, n)
-        # k represents the current pivot row. Since GE traverses the matrix in the
-        # upper right triangle, we also use k for indicating the k-th diagonal
-        # column index.
+                # print "K: %d, %d" %( k_col, k_row)
+                print "Matrix is singular."
+                # print A
+                offset += 1
+                # print A
+                # quit()
+                k_row = k_col + offset
+                if k_row == num_columns:
+                    print "Matrix has row echelon form"
+                    return A
+                maxindex = A[k_col:, k_row].argmax() + k_col  # Pruefen, wo die erste 1 unterhalb des Pivotelements sich befindet
+                # print "MAXINDEX: ", maxindex
+            print maxindex, k_col
+            if maxindex != k_col:  # Swap the columns so the pivot element is first
+                # print "PIVOT"
+                A[[maxindex, k_col]] = A[[k_col, maxindex]]
 
-        # Elimination
-        for k in range(n - 1):
-            if doPricing:
-                # Pivot
-                maxindex = abs(A[k:, k]).argmax() + k
-                if A[maxindex, k] == 0:
-                    print "K: %d , MAXINDEX:%d"%(k, maxindex)
-                    raise ValueError("Matrix is singular.")
-                # Swap
-                if maxindex != k:
-                    A[[k, maxindex]] = A[[maxindex, k]]
-                    b[[k, maxindex]] = b[[maxindex, k]]
-            else:
-                if A[k, k] == 0:
-                    raise ValueError("Pivot element is zero. Try setting doPricing to True.")
-            # Eliminate
-            for row in range(k + 1, n):
-                multiplier = A[row, k] / A[k, k]
-                A[row, k:] = A[row, k:] - multiplier * A[k, k:]
-                b[row] = b[row] - multiplier * b[k]
-
-
-        return A
-
-    def gauss(self, A, b):
-        n = len(A)
-        for k in range(n - 1):
-            maxindex = abs(A[k:, k]).argmax() + k  # The column where the first 1 is located
-            if A[maxindex, k] == 0:
-                raise ValueError("Matrix is singular.")
-            if maxindex != k:  # Swap the columns so the pivot element is first
-                A[[k, maxindex]] = A[[maxindex, k]]
-                b[[k, maxindex]] = b[[maxindex, k]]
-            for row in range(k + 1, n):  # Eliminate  fuer jede reihe (Gleichung) unterhalb des pivot elements
-                # print "row:%d, col:%d, " % (row, k)
-                if A[row, k] == 0:
+            for row in range(k_col + 1, num_rows):
+                # print "ROW: %d" % row
+                if A[row, k_col + offset] == 0:
                     continue
-                else:
-                    for A_elem_row, A_elem_k, b_elem_row, b_elem_k in zip(A[row, :], A[k, :], b[row, :], b[k, :]):
-                        # print "belems:%d, %d"%(b_elem_k, b_elem_row)
-                        A[row, k] = xor(int(A_elem_row), int(A_elem_k))
-                        b[row, 0] = xor(int(b_elem_row), int(b_elem_k))
+                A[row, :] = np.logical_xor(A[row, :], A[k_col, :])
+        # return A[:self.num * self.num, :]
+        return A
+        # return A[:self.]
 
-        return A, b
 
     def build_coeff(self, length):
         x = np.zeros((length, 1))
-        x[5] = 1
         return x
-
 
     def get_num(self):
         """
         :return: The number of coefficients we have
         """
-        return max(self.pkey.key[0].replace('+', '').replace('*', '').split('x_'))
+
+        # print max(map(int, self.pkey.key[0].replace('+', '').replace('*', '').split('x_')[1:]))
+        return max(map(int, self.pkey.key[0].replace('+', '').replace('*', '').split('x_')[1:]))
+
+    def chitext_creation_process(self, i):
+        return self.create_relation(self.generate_pair(generate_plaintext(self.num)))
 
     def generate_pairs(self, rel):
         """
@@ -123,18 +126,38 @@ class KeyReader:
         :param rel:
         :return:
         """
-        new_pair = self.generate_pair()
-        textpairs = [new_pair]
+        print self.num
+        p = Pool(10)
+        # plaintexts = [self.generate_plaintext(self.num) for i in xrange(0, self.rel)]
+        # while len(plaintexts) < rel:
+        #     plaintexts.append()
+        i = range(0, self.rel)
+        relation = np.array(p.map(unwrap_self_pairs, zip([self]*len(i), i)), dtype=int)
+        p.close()
+        p.join()
+        return relation[:, 0, :]
+        # i = 0
+        # while len(plaintexts) < rel:
+        #     new_plaintext = self.generate_plaintext(self.num)
+        #     for plaintext in plaintexts:
+        #         same = True
+        #         for p_elem, n_elem in zip(plaintext, new_plaintext):
+        #             if p_elem != n_elem:
+        #                 same = False
+        #                 break
+        #         if same:
+        #             break
+        #     if not same:
+        #         plaintexts.append(new_plaintext)
+        # textpairs = []
+        # for plaintext in plaintexts:
+        #     textpairs.append(self.generate_pair(plaintext))
+        # return textpairs
 
-        while len(textpairs) < rel:
-            new_pair = self.generate_pair()
-            if new_pair not in textpairs:
-                textpairs.append(new_pair)
+    def generate_pair(self, plaintext):
+        return Textpair.Textpair(plaintext, self.num, self.pkey)
 
-        return textpairs
 
-    def generate_pair(self):
-        return Textpair.Textpair(self.num, self.pkey)
 
     def create_relation(self, textpair):
         """
@@ -147,17 +170,141 @@ class KeyReader:
         for i in xrange(1, len(textpair.plaintext.y) + 1):
             for j in xrange(1, len(textpair.chitext.x) + 1):
                 # print "%d * %d = %d" % (textpair.chitext.x_(j), textpair.plaintext.y_(i), textpair.chitext.x_(j) * textpair.plaintext.y_(i))
-                relation[0][k] = (mul(textpair.plaintext.y_(i), textpair.chitext.x_(j)))
+                relation[0, k] = (mul(textpair.plaintext.y_(i), textpair.chitext.x_(j)))
                 k += 1
-        return relation[0]
+        return relation
 
-    def fill_in(self, A, b):
-        # Check wether the correct chitext is produced and verify if the key was correct
-        pass
-
-    def build_special_rel(self, A, b):
+    def build_special_rel(self, A):
+        # print A.shape
         # Brute Force all possible values for the x_ variables
-        for x in xrange(0, (int(pow(2, self.num)) + 1)):
+        # length = int(pow(self.num, 2))
+        length = 25
+        # vars = np.empty((length, 1), dtype=int)
+        # vars.fill('2')
+        vars = ['2' for i in xrange(length)]
+        # print vars
+        for i in xrange(A.shape[0] - 1, -1, -1):
+            # print i
+            if i == 14:
+                pass
+                # print vars
+                # return vars
+            unknowns = 0
+            cur_unknowns = []
+            for j in xrange(0, A.shape[1]):
+                if i == 15:
+                    pass
+                    # print vars[j], j
+                if A[i, j] == 1:
+                    if vars[j] == '2':
+                        unknowns += 1
+                        cur_unknowns.append(j)
+                    if isinstance(vars[j], list):
+                        unknowns += 1
+                        cur_unknowns.append(j)
+        #             else:
+        #                 unknowns += 1
+        #
+            if unknowns == 0:
+                continue
+            if unknowns == 1:
+                vars[cur_unknowns[0]] = '0'
+            elif unknowns > 1:
+                # for unknown in xrange(1, len(cur_unknowns)):
+                #     print "trets"
+                vars[cur_unknowns[0]] = [cur_unknowns[unknown] for unknown in xrange(1, len(cur_unknowns))]
+            else:
+                # print unknowns, cur_unknowns
+                raise ValueError("ERROR")
+            # elif unknowns == 2:
+        #         # vars[cur_unknowns[0]] = 0
+        #         for entry in cur_unknowns:
+        #             vars
+        #     else:
+        #         print i, j, unknowns
+        #         raise ValueError
+            # print A[i, :]
+        # print vars
+        return vars
+
+    def check_inputs(self, special_rel, rel):
+
+        def fill_in(possible_val):
+            print binary
+            print possible_val
+            for row in xrange(0, rel.shape[0]):
+                if np.count_nonzero(rel[row, :]) == 0:
+                    continue
+                print rel[row, :]
+                print np.asarray(possible_val)
+                print "\n"
+                values = np.logical_and(rel[row, :], possible_val)
+                # print values
+                solution = reduce(lambda x, y: int(xor(x, y)), values)
+                # print solution
+                if solution != 0:
+                    print "test False"
+                    return False
+            print "TEST True"
+            return True
+
+        def insert(binary):
+            # print binary
+            # binary = [1, 0, 1, 0, 1]
+            rel_copy = list(special_rel)
+            cur_unknown = 0
+            for i in xrange(len(rel_copy) - 1, -1, -1):
+                if rel_copy[i] == '2':
+                    rel_copy[i] = binary[cur_unknown]
+                    cur_unknown += 1
+                if rel_copy == '0':
+                    rel_copy[i] = 0
+            for i in xrange(len(rel_copy) - 1, -1, -1):
+                if isinstance(rel_copy[i], list):
+                    result = rel_copy[rel_copy[i][0]]
+                    for j in xrange(1, len(rel_copy[i])):
+                        result = xor(result, rel_copy[rel_copy[i][j]])
+                    rel_copy[i] = result
+            return rel_copy
+
+        def get_bin(index, digit):
+            if index >= len(digit):
+                return 0
+            return int(digit[len(digit) - 1 - index])
+
+        unknowns = 0
+        possible_values = []
+        for entry in special_rel:
+            if entry == '2':
+                unknowns += 1
+        max_num = int(pow(2, unknowns))
+        for i in xrange(1, max_num):
+            binary = []
+            binary_digit = bin(i).split('b')[1]
+            # print binary_digit
+            for j in range(unknowns - 1, -1, -1):
+                binary.append(get_bin(j, binary_digit))
+            possible_value = insert(binary)
+            if fill_in(possible_value):
+                possible_values.append(possible_value)
+        return possible_values
+
+    def determine_plaintext(self,  possible_relations, chitext):
+        max_xy_val = sqrt(possible_relations.shape[1]) - 1
+        for row in xrange(0, possible_relations.shape[0]):
+            print "ROW: ", row
+            cur_y_val = 0
+            cur_x_val = 0
+            i = 0
+            for elem in possible_relations[row, :]:
+                i += 1
+                print cur_x_val, cur_y_val
+                if cur_y_val == max_xy_val:
+                    cur_x_val += 1
+                    cur_y_val = 0
+                cur_y_val += 1
+            print "I: ", i
+            quit()
 
 
     def start(self):
@@ -165,32 +312,251 @@ class KeyReader:
         Start the Attack
         :return:
         """
-        # textpairs = self.generate_pairs(self.rel)
-        # relations = []
-        # for textpair in textpairs:
-        #     relations.append(self.create_relation(textpair))
-        # relations = np.asarray(relations)
-        # coeffs = self.build_coeff(len(np.asmatrix(relations)))
+        # textpair = self.generate_pair(self.generate_plaintext(self.num))
+        # print textpairs
+        # print self.create_relation(textpair)
+        # relations = self.create_relations(textpairs)
+
+        # print type(self.generate_plaintext(10))
+        # quit()
+
+        # start = time.time()
+        # print "Creating Textpairs"
+        # relations = self.generate_pairs(self.rel)
+        # print "Creating Textpairs done."
+        # end = time.time()
+        # time_rel = end - start
+        # start = time.time()
         # print relations
-        # self.GEPP(relations, coeffs)
-        A = np.array([
-            [0., 0., 1., 0., 1.],
-            [1., 1., 0., 1., 1.],
+        # print "Starting Gauss elimination"
+        # gauss_matrix = self.gauss(relations)
+        # print gauss_matrix
+        # tot = 0
+        # lala = np.count_nonzero(gauss_matrix, axis=1)
+        # for entry in lala:
+        #     if entry == 0:
+        #         tot += 1
+        # print "Laenge: ", len(lala)
+        # print "Anzahl zero rows: ", tot
+        # print "Gaussian elimination done."
+        # end = time.time()
+        # time_gauss = end - start
+        # start = time.time()
+        # print "Starting Back-Substitution"
+        # rollup = self.build_special_rel(gauss_matrix)
+        # print rollup
+        # print "Back-Subnstitution done"
+        # # quit()
+        # end = time.time()
+        # time_spec = end - start
+        # start = time.time()
+        # print "Starting Brute-Forcing for free variables"
+        # solutions = self.check_inputs(rollup, relations)
+        # print "Possible solutions created"
+        # end = time.time()
+        # time_check = end - start
+        # print time_rel, time_gauss, time_spec, time_check
+        # print np.asarray(solutions)
+        # quit()
+        # coeffs = self.build_coeff(len(np.asmatrix(relations)))
+        A_solved = np.array([
             [1., 1., 1., 1., 1.],
             [0., 1., 0., 0., 1.],
-            [1., 0., 1., 1., 1.],
+            [0., 0., 1., 0., 0.],
+            [0., 0., 0., 0., 1.],
+        ], dtype=int)
+        # vars = self.build_special_rel(A_solved)
+        # vars = [[3], '0', '0', '2', '2', '2']
+
+        # self.gauss(A)
+        # A = np.array([
+        #    [1., 0., 1., 0., 0.],
+        #    [0., 1., 0., 1., 0.],
+        #    [1., 1., 0., 1., 1.],
+        #    [0., 0., 0., 0., 0.],
+        #    [1., 1., 1., 0., 0.],
+        #    [0., 1., 0., 1., 0.],
+        #    [0., 1., 1., 1., 1.],
+        #    [0., 0., 0., 0., 1.],
+        #    [1., 0., 0., 0., 0.],
+        #    [0., 1., 1., 0., 1.],
+        #    [0., 0., 1., 0., 0.],
+        #    [1., 1., 0., 0., 0.],
+        #    [0., 0., 0., 0., 0.],
+        #    [0., 0., 1., 1., 1.],
+        #    [1., 1., 0., 1., 0.],
+        #    [0., 0., 1., 0., 0.],
+        #    [1., 0., 0., 0., 0.],
+        #    [0., 1., 1., 0., 0.],
+        #    [1., 0., 0., 1., 0.],
+        #    [1., 0., 0., 1., 0.],
+        #    [0., 0., 0., 1., 1.],
+        #    [0., 1., 0., 0., 1.],
+        #    [1., 1., 1., 0., 0.],
+        #    [1., 0., 0., 1., 1.],
+        #    [1., 1., 0., 1., 0.],
+        #    [1., 0., 0., 1., 0.],
+        #    [1., 0., 0., 0., 0.],
+        #    [1., 0., 1., 1., 1.],
+        #    [1., 1., 0., 1., 0.],
+        #    [0., 1., 1., 1., 1.],
+        #    [0., 1., 0., 1., 1.],
+        #    [0., 1., 0., 0., 1.],
+        #    [0., 1., 0., 1., 0.],
+        #    [1., 1., 0., 0., 1.],
+        #    [1., 1., 1., 0., 0.],
+        #    [1., 1., 0., 0., 1.],
+        #    [0., 1., 1., 1., 0.],
+        #    [0., 1., 0., 0., 0.],
+        #    [0., 0., 1., 0., 0.],
+        #    [0., 1., 0., 0., 0.],
+        #    [0., 0., 0., 1., 0.],
+        #    [1., 1., 1., 0., 0.],
+        #    [1., 0., 1., 0., 0.],
+        #    [1., 0., 1., 0., 1.],
+        #    [0., 1., 1., 0., 1.],
+        #    [0., 0., 1., 0., 0.],
+        #    [0., 0., 0., 0., 1.],
+        # ])
+        # print A[:][1]
+        # b = np.array([
+        #    [0.],
+        #    [0.],
+        #    [0.],
+        #    [0.],
+        #    [0.],
+        #    [0.],
+        #    [0.],
+        # ])
+        # print relations
+        # print relations
+        # self.gauss(A)
+        A_relation = np.array([
+            [0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0],
+            [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1],
+            [1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0],
+            [0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1],
+            [0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0],
+            [0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1],
+            [1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0],
+            [1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0],
+            [0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0],
+            [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0],
+            [1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1],
+            [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+            [0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0],
+            [1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1],
+            [1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0],
+            [1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1],
+            [1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0],
+            ], dtype=int
+        )
+        # A_relation = np.array([
+        #     [0., 0., 1., 0., 0.],
+        #     [1., 1., 0., 1., 1.],
+        #     [1., 0., 0., 1., 0.],
+        #     [1., 0., 1., 1., 1.],
+        #     [0., 0., 1., 1., 0.],
+        #     [1., 1., 1., 1., 0.],
+        #     [0., 1., 1., 0., 0.],
+        # ], dtype=int)
+        # A_relation = np.array([
+        #     [1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        #     [0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        #     [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0],
+        #     [0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1],
+        #     [0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0],
+        #     [0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        #     [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0],
+        #     [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1],
+        #     [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0],
+        #     [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1],
+        #     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0],
+        #     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0],
+        #     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 0],
+        #     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1],
+        #     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 0, 1, 0, 0, 1],
+        #     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0],
+        #     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1],
+        #     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0],
+        #     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1],
+        #     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1],
+        #     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        #     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        #     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        #     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        #     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+
+        # ], dtype=int)
+        A = np.array([
+            [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0],
+            [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         ])
         b = np.array([
-            [0.],
-            [0.],
-            [0.],
-            [0.],
-            [0.],
+            [0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0],
+            [0, 1, 1, 1, 0],
+            [0, 1, 1, 1, 1],
         ])
-        gauss_matrix, coeffs = self.gauss(A, b)
-        self.build_special_rel(gauss_matrix, coeffs)
-
+        solved_relation = self.gauss(A_relation)
+        print solved_relation
+        lala = np.count_nonzero(solved_relation, axis=1)
+        tot = 0
+        for entry in lala:
+            if entry == 0:
+                tot += 1
+        # print "Laenge: ", len(lala)
+        # print "Anzahl zero rows: ", tot
+        special_rel = self.build_special_rel(solved_relation)
+        print special_rel
+        binaries = self.check_inputs(special_rel, A_relation)
+        print np.asarray(binaries)
+        print self.determine_plaintext(np.asarray(binaries), [1, 1, 1, 0, 0])
 
 if __name__ == '__main__':
-    reader = KeyReader('C:\Users\Pascal\Desktop\cryptochallenge/test_pkey.txt', 100)
+    # reader = KeyReader('C:\Users\Pascal\Desktop/cryptochallenge\\public_key.txt', 2000) # Genug Gleichungen erzeugen, sodass die Matrix nie fehlerhaft singular sein kann.
+    reader = KeyReader('C:\Users\Pascal\Desktop/cryptochallenge\\test_pkey.txt', 50) # Genug Gleichungen erzeugen, sodass die Matrix nie fehlerhaft singular sein kann.
+    # reader = KeyReader('C:\Users\Pascal-Laptop\Desktop\pkey_full.txt', 2000) # Genug Gleichungen erzeugen, sodass die Matrix nie fehlerhaft singular sein kann.
     reader.start()
