@@ -35,3 +35,7 @@ class Chitext:
         """
         value = var.split('_')[1]
         return self.x_(int(value))
+
+
+    def decrypt(self, pkey):
+        pass

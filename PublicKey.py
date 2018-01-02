@@ -8,4 +8,4 @@ class PublicKey:
 
     @staticmethod
     def split_file(keytext):
-        return keytext.replace('[', '').replace(']', '').replace(' ', '').replace('\n', '').replace('\r', '').split(',')
+        return keytext.replace('[', '').replace(']', '').replace('\t', '').replace(' ', '').replace('\n', '').replace('\r', '').split(',')

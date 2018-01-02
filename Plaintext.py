@@ -43,6 +43,11 @@ class Plaintext:
         return reduce(lambda x, y: mul(x, y), args)
 
     def generate_chitext(self, pkey):
+        """
+        Encryption of given plaintext
+        :param pkey:
+        :return: chitext for the given plaintext
+        """
         chitext = []
         for row in pkey.key:
             elems_to_add = []
